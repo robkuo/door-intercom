@@ -1,0 +1,209 @@
+{% extends "base.html" %}
+
+{% block title %}人臉管理 - 門禁系統管理{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2><i class="bi bi-person-badge"></i> 人臉管理</h2>
+    <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#enrollModal">
+        <i class="bi bi-person-plus"></i> 登錄新人臉
+    </button>
+</div>
+
+<!-- 人臉列表 -->
+<div class="card">
+    <div class="card-header">
+        <h5 class="mb-0">已登錄人臉列表</h5>
+    </div>
+    <div class="card-body">
+        <div class="loading-spinner" id="loadingSpinner">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">載入中...</span>
+            </div>
+            <p class="mt-2">載入中...</p>
+        </div>
+
+        <div class="table-responsive" id="faceTableContainer">
+            <table class="table table-dark table-striped table-hover">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>姓名</th>
+                        <th>所屬公司</th>
+                        <th>登錄時間</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody id="faceTableBody">
+                </tbody>
+            </table>
+        </div>
+
+        <div id="noDataMessage" class="text-center text-secondary py-5" style="display: none;">
+            <i class="bi bi-person-x" style="font-size: 3em;"></i>
+            <p class="mt-2">尚無登錄的人臉資料</p>
+        </div>
+    </div>
+</div>
+
+<!-- 登錄新人臉 Modal -->
+<div class="modal fade" id="enrollModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-person-plus"></i> 登錄新人臉</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <form id="enrollForm" enctype="multipart/form-data">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">姓名 <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" name="name" required placeholder="請輸入姓名">
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">所屬公司</label>
+                        <select class="form-select" name="company_id">
+                            <option value="0">-- 無 --</option>
+                            {% for company_id, info in companies.items() %}
+                            <option value="{{ company_id }}">{{ info.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">照片 <span class="text-danger">*</span></label>
+                        <input type="file" class="form-control" name="photo" accept="image/png,image/jpeg,image/jpg" required>
+                        <div class="form-text text-secondary">
+                            支援 PNG, JPG, JPEG 格式，建議使用正面清晰照片
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <img id="photoPreview" src="" alt="照片預覽" class="img-fluid rounded" style="display: none; max-height: 200px;">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-success" id="enrollBtn">
+                        <span class="spinner-border spinner-border-sm d-none" role="status"></span>
+                        <i class="bi bi-check-lg"></i> 登錄
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // 載入人臉列表
+    async function loadFaces() {
+        document.getElementById('loadingSpinner').style.display = 'block';
+        document.getElementById('faceTableContainer').style.display = 'none';
+        document.getElementById('noDataMessage').style.display = 'none';
+
+        const result = await apiCall('/api/faces');
+
+        document.getElementById('loadingSpinner').style.display = 'none';
+
+        if (result.success) {
+            const tbody = document.getElementById('faceTableBody');
+            tbody.innerHTML = '';
+
+            if (result.data.length === 0) {
+                document.getElementById('noDataMessage').style.display = 'block';
+            } else {
+                document.getElementById('faceTableContainer').style.display = 'block';
+
+                result.data.forEach(face => {
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                        <td>${face.id}</td>
+                        <td><i class="bi bi-person-circle"></i> ${face.name}</td>
+                        <td>${face.company_name}</td>
+                        <td>${face.created_at || '-'}</td>
+                        <td>
+                            <button class="btn btn-sm btn-danger" onclick="deleteFace(${face.id}, '${face.name}')">
+                                <i class="bi bi-trash"></i> 刪除
+                            </button>
+                        </td>
+                    `;
+                    tbody.appendChild(row);
+                });
+            }
+        } else {
+            showAlert(result.error || '載入失敗', 'danger');
+        }
+    }
+
+    // 刪除人臉
+    async function deleteFace(id, name) {
+        if (!confirmAction(`確定要刪除「${name}」的人臉資料嗎？`)) {
+            return;
+        }
+
+        const result = await apiCall(`/api/faces/${id}`, 'DELETE');
+
+        if (result.success) {
+            showAlert('刪除成功', 'success');
+            loadFaces();
+        } else {
+            showAlert(result.error || '刪除失敗', 'danger');
+        }
+    }
+
+    // 照片預覽
+    document.querySelector('input[name="photo"]').addEventListener('change', function(e) {
+        const file = e.target.files[0];
+        if (file) {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const preview = document.getElementById('photoPreview');
+                preview.src = e.target.result;
+                preview.style.display = 'block';
+            };
+            reader.readAsDataURL(file);
+        }
+    });
+
+    // 登錄表單提交
+    document.getElementById('enrollForm').addEventListener('submit', async function(e) {
+        e.preventDefault();
+
+        const btn = document.getElementById('enrollBtn');
+        const spinner = btn.querySelector('.spinner-border');
+        btn.disabled = true;
+        spinner.classList.remove('d-none');
+
+        const formData = new FormData(this);
+
+        try {
+            const response = await fetch('/api/faces/enroll', {
+                method: 'POST',
+                body: formData
+            });
+            const result = await response.json();
+
+            if (result.success) {
+                showAlert(result.message || '登錄成功', 'success');
+                bootstrap.Modal.getInstance(document.getElementById('enrollModal')).hide();
+                this.reset();
+                document.getElementById('photoPreview').style.display = 'none';
+                loadFaces();
+            } else {
+                showAlert(result.error || '登錄失敗', 'danger');
+            }
+        } catch (error) {
+            showAlert('登錄失敗: ' + error.message, 'danger');
+        } finally {
+            btn.disabled = false;
+            spinner.classList.add('d-none');
+        }
+    });
+
+    // 頁面載入時載入人臉列表
+    document.addEventListener('DOMContentLoaded', loadFaces);
+</script>
+{% endblock %}

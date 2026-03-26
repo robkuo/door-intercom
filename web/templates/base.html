@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}門禁系統管理{% endblock %}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        :root {
+            --primary-bg: #1a1a2e;
+            --secondary-bg: #16213e;
+            --accent: #0f3460;
+            --highlight: #e94560;
+            --success: #00d9a0;
+            --text: #ffffff;
+            --text-secondary: #a0a0a0;
+        }
+
+        body {
+            background-color: var(--primary-bg);
+            color: var(--text);
+            min-height: 100vh;
+        }
+
+        .sidebar {
+            background-color: var(--secondary-bg);
+            min-height: 100vh;
+            padding: 20px 0;
+        }
+
+        .sidebar .nav-link {
+            color: var(--text-secondary);
+            padding: 12px 20px;
+            margin: 4px 10px;
+            border-radius: 8px;
+            transition: all 0.3s;
+        }
+
+        .sidebar .nav-link:hover,
+        .sidebar .nav-link.active {
+            background-color: var(--accent);
+            color: var(--text);
+        }
+
+        .sidebar .nav-link i {
+            margin-right: 10px;
+            font-size: 1.1em;
+        }
+
+        .main-content {
+            padding: 30px;
+        }
+
+        .card {
+            background-color: var(--secondary-bg);
+            border: none;
+            border-radius: 12px;
+        }
+
+        .card-header {
+            background-color: var(--accent);
+            border-bottom: none;
+            border-radius: 12px 12px 0 0 !important;
+        }
+
+        .btn-primary {
+            background-color: var(--highlight);
+            border-color: var(--highlight);
+        }
+
+        .btn-primary:hover {
+            background-color: #ff6b6b;
+            border-color: #ff6b6b;
+        }
+
+        .btn-success {
+            background-color: var(--success);
+            border-color: var(--success);
+        }
+
+        .table {
+            color: var(--text);
+        }
+
+        .table-dark {
+            --bs-table-bg: var(--accent);
+            --bs-table-striped-bg: #1a3a5c;
+            --bs-table-hover-bg: #1f4a70;
+        }
+
+        .form-control, .form-select {
+            background-color: var(--accent);
+            border-color: var(--accent);
+            color: var(--text);
+        }
+
+        .form-control:focus, .form-select:focus {
+            background-color: var(--accent);
+            border-color: var(--highlight);
+            color: var(--text);
+            box-shadow: 0 0 0 0.25rem rgba(233, 69, 96, 0.25);
+        }
+
+        .stat-card {
+            background: linear-gradient(135deg, var(--accent), var(--secondary-bg));
+            border-radius: 12px;
+            padding: 20px;
+            text-align: center;
+        }
+
+        .stat-card .stat-value {
+            font-size: 2.5em;
+            font-weight: bold;
+            color: var(--success);
+        }
+
+        .stat-card .stat-label {
+            color: var(--text-secondary);
+            font-size: 0.9em;
+        }
+
+        .logo {
+            font-size: 1.5em;
+            font-weight: bold;
+            color: var(--text);
+            padding: 20px;
+            text-align: center;
+            border-bottom: 1px solid var(--accent);
+            margin-bottom: 20px;
+        }
+
+        .user-info {
+            padding: 15px 20px;
+            border-top: 1px solid var(--accent);
+            margin-top: auto;
+            color: var(--text-secondary);
+        }
+
+        .alert {
+            border: none;
+            border-radius: 8px;
+        }
+
+        .modal-content {
+            background-color: var(--secondary-bg);
+            color: var(--text);
+        }
+
+        .modal-header {
+            border-bottom-color: var(--accent);
+        }
+
+        .modal-footer {
+            border-top-color: var(--accent);
+        }
+
+        .badge-active {
+            background-color: var(--success);
+        }
+
+        .badge-inactive {
+            background-color: var(--highlight);
+        }
+
+        .loading-spinner {
+            display: none;
+            text-align: center;
+            padding: 40px;
+        }
+
+        @media (max-width: 768px) {
+            .sidebar {
+                min-height: auto;
+            }
+        }
+    </style>
+    {% block extra_css %}{% endblock %}
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="row">
+            <!-- 側邊欄 -->
+            <div class="col-md-2 sidebar d-flex flex-column">
+                <div class="logo">
+                    <i class="bi bi-shield-lock"></i> 門禁管理
+                </div>
+
+                <nav class="nav flex-column">
+                    <a class="nav-link {% if request.endpoint == 'dashboard' %}active{% endif %}" href="{{ url_for('dashboard') }}">
+                        <i class="bi bi-speedometer2"></i> 儀表板
+                    </a>
+                    <a class="nav-link {% if request.endpoint == 'users' %}active{% endif %}" href="{{ url_for('users') }}">
+                        <i class="bi bi-people-fill"></i> 用戶管理
+                    </a>
+                    <a class="nav-link {% if request.endpoint == 'faces' %}active{% endif %}" href="{{ url_for('faces') }}">
+                        <i class="bi bi-person-badge"></i> 人臉管理
+                    </a>
+                    <a class="nav-link {% if request.endpoint == 'nfc' %}active{% endif %}" href="{{ url_for('nfc') }}">
+                        <i class="bi bi-credit-card"></i> NFC 管理
+                    </a>
+                    <a class="nav-link {% if request.endpoint == 'passwords' %}active{% endif %}" href="{{ url_for('passwords') }}">
+                        <i class="bi bi-key-fill"></i> 密碼管理
+                    </a>
+                    <a class="nav-link {% if request.endpoint == 'settings' %}active{% endif %}" href="{{ url_for('settings') }}">
+                        <i class="bi bi-gear"></i> 系統設定
+                    </a>
+                    <a class="nav-link {% if request.endpoint == 'logs' %}active{% endif %}" href="{{ url_for('logs') }}">
+                        <i class="bi bi-journal-text"></i> 存取日誌
+                    </a>
+                </nav>
+
+                <div class="user-info">
+                    <i class="bi bi-person-circle"></i> {{ session.get('username', 'Admin') }}
+                    <a href="{{ url_for('logout') }}" class="float-end text-danger">
+                        <i class="bi bi-box-arrow-right"></i>
+                    </a>
+                </div>
+            </div>
+
+            <!-- 主內容區 -->
+            <div class="col-md-10 main-content">
+                {% with messages = get_flashed_messages(with_categories=true) %}
+                    {% if messages %}
+                        {% for category, message in messages %}
+                            <div class="alert alert-{{ 'danger' if category == 'error' else category }} alert-dismissible fade show" role="alert">
+                                {{ message }}
+                                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                            </div>
+                        {% endfor %}
+                    {% endif %}
+                {% endwith %}
+
+                {% block content %}{% endblock %}
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // 通用 API 呼叫函數
+        async function apiCall(url, method = 'GET', data = null) {
+            const options = {
+                method: method,
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            };
+
+            if (data && method !== 'GET') {
+                options.body = JSON.stringify(data);
+            }
+
+            try {
+                const response = await fetch(url, options);
+                return await response.json();
+            } catch (error) {
+                return { success: false, error: error.message };
+            }
+        }
+
+        // 顯示提示訊息
+        function showAlert(message, type = 'info') {
+            const alertDiv = document.createElement('div');
+            alertDiv.className = `alert alert-${type} alert-dismissible fade show`;
+            alertDiv.innerHTML = `
+                ${message}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            `;
+            document.querySelector('.main-content').prepend(alertDiv);
+
+            setTimeout(() => alertDiv.remove(), 5000);
+        }
+
+        // 確認對話框
+        function confirmAction(message) {
+            return confirm(message);
+        }
+    </script>
+    {% block extra_js %}{% endblock %}
+</body>
+</html>

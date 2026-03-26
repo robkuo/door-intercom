@@ -1,0 +1,474 @@
+{% extends "base.html" %}
+
+{% block title %}系統設定 - 門禁系統管理{% endblock %}
+
+{% block content %}
+<h2 class="mb-4"><i class="bi bi-gear"></i> 系統設定</h2>
+
+<div class="row">
+    <!-- 修改密碼 -->
+    <div class="col-md-6">
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-key"></i> 修改管理員密碼</h5>
+            </div>
+            <div class="card-body">
+                <form id="passwordForm">
+                    <div class="mb-3">
+                        <label class="form-label">原密碼</label>
+                        <input type="password" class="form-control" name="old_password" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">新密碼</label>
+                        <input type="password" class="form-control" name="new_password" required minlength="6">
+                        <div class="form-text text-secondary">密碼至少 6 個字元</div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">確認新密碼</label>
+                        <input type="password" class="form-control" name="confirm_password" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-check-lg"></i> 修改密碼
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- 系統資訊 -->
+    <div class="col-md-6">
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-info-circle"></i> 系統資訊</h5>
+            </div>
+            <div class="card-body" id="systemInfo">
+                <div class="loading-spinner" id="loadingSpinner">
+                    <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
+                    載入中...
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 公司設定 -->
+<div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="bi bi-building"></i> 公司設定</h5>
+        <button class="btn btn-success btn-sm" onclick="saveAllCompanies()">
+            <i class="bi bi-check-lg"></i> 儲存所有變更
+        </button>
+    </div>
+    <div class="card-body">
+        <div class="alert alert-info">
+            <i class="bi bi-info-circle"></i>
+            修改公司名稱後，請點擊「儲存所有變更」按鈕。觸控螢幕介面會在幾秒內自動更新。
+        </div>
+        <div class="table-responsive">
+            <table class="table table-dark table-striped" id="companiesTable">
+                <thead>
+                    <tr>
+                        <th style="width: 60px;">ID</th>
+                        <th>公司名稱</th>
+                        <th style="width: 120px;">分機</th>
+                        <th style="width: 100px;">樓層</th>
+                        <th style="width: 80px;">操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for company_id, info in companies.items() %}
+                    <tr data-company-id="{{ company_id }}">
+                        <td>{{ company_id }}</td>
+                        <td>
+                            <input type="text" class="form-control form-control-sm bg-dark text-white border-secondary company-name"
+                                   value="{{ info.name }}" data-original="{{ info.name }}">
+                        </td>
+                        <td>
+                            <input type="text" class="form-control form-control-sm bg-dark text-white border-secondary company-extension"
+                                   value="{{ info.extension }}" data-original="{{ info.extension }}">
+                        </td>
+                        <td>
+                            <input type="text" class="form-control form-control-sm bg-dark text-white border-secondary company-floor"
+                                   value="{{ info.floor if info.floor else '' }}" data-original="{{ info.floor if info.floor else '' }}">
+                        </td>
+                        <td>
+                            <button class="btn btn-primary btn-sm" onclick="saveCompany({{ company_id }})">
+                                <i class="bi bi-save"></i>
+                            </button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- 音訊設定 -->
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="mb-0"><i class="bi bi-volume-up"></i> 音訊設定（門口麥克風 / 喇叭）</h5>
+    </div>
+    <div class="card-body" id="audioSettingsBody">
+        <div class="text-secondary text-center py-3" id="audioLoading">
+            <div class="spinner-border spinner-border-sm" role="status"></div> 載入中...
+        </div>
+
+        <div id="audioForm" style="display:none;">
+            <div class="row g-4">
+                <!-- 麥克風 -->
+                <div class="col-md-4">
+                    <label class="form-label fw-bold">
+                        <i class="bi bi-mic"></i> 麥克風音量
+                        <span class="text-secondary ms-1" id="micDb"></span>
+                    </label>
+                    <input type="range" class="form-range" id="micVolume"
+                           min="0" max="147" step="1"
+                           oninput="updateAudioLabels()">
+                    <div class="d-flex justify-content-between">
+                        <small class="text-secondary">靜音</small>
+                        <small class="text-secondary fw-bold" id="micVolLabel"></small>
+                        <small class="text-secondary">最大</small>
+                    </div>
+                </div>
+
+                <!-- 喇叭 -->
+                <div class="col-md-4">
+                    <label class="form-label fw-bold">
+                        <i class="bi bi-speaker"></i> 喇叭音量
+                        <span class="text-secondary ms-1" id="spkDb"></span>
+                    </label>
+                    <input type="range" class="form-range" id="spkVolume"
+                           min="0" max="147" step="1"
+                           oninput="updateAudioLabels()">
+                    <div class="d-flex justify-content-between">
+                        <small class="text-secondary">靜音</small>
+                        <small class="text-secondary fw-bold" id="spkVolLabel"></small>
+                        <small class="text-secondary">最大</small>
+                    </div>
+                </div>
+
+                <!-- 噪音閘門 -->
+                <div class="col-md-4">
+                    <label class="form-label fw-bold">
+                        <i class="bi bi-activity"></i> 噪音閘門（背景雜音過濾）
+                    </label>
+                    <input type="range" class="form-range" id="noiseGate"
+                           min="0" max="2000" step="50"
+                           oninput="updateAudioLabels()">
+                    <div class="d-flex justify-content-between">
+                        <small class="text-secondary">關閉</small>
+                        <small class="text-secondary fw-bold" id="noiseGateLabel"></small>
+                        <small class="text-secondary">最強</small>
+                    </div>
+                    <div class="form-text text-secondary mt-1">
+                        數值越高過濾越強（建議 400–800）；<br>
+                        設為 0 則關閉過濾。
+                    </div>
+                </div>
+            </div>
+
+            <div class="mt-4 d-flex align-items-center gap-3">
+                <button class="btn btn-primary" onclick="saveAudioSettings()">
+                    <i class="bi bi-check-lg"></i> 儲存音訊設定
+                </button>
+                <button class="btn btn-outline-secondary btn-sm" onclick="loadAudioSettings()">
+                    <i class="bi bi-arrow-counterclockwise"></i> 重新讀取
+                </button>
+                <span class="text-secondary small">
+                    <i class="bi bi-info-circle"></i>
+                    麥克風 / 喇叭音量變更後立即生效並永久保留；噪音閘門在下次通話接通時生效。
+                </span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 硬體設定 -->
+<div class="card">
+    <div class="card-header">
+        <h5 class="mb-0"><i class="bi bi-cpu"></i> 硬體設定</h5>
+    </div>
+    <div class="card-body">
+        <div class="alert alert-info">
+            <i class="bi bi-info-circle"></i>
+            硬體設定需要直接修改 config.py 檔案並重新啟動系統。
+        </div>
+        <div class="row" id="hardwareSettings">
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // 載入系統設定
+    async function loadSettings() {
+        const result = await apiCall('/api/settings');
+
+        document.getElementById('loadingSpinner').style.display = 'none';
+
+        if (result.success) {
+            const settings = result.data;
+
+            // 系統資訊
+            document.getElementById('systemInfo').innerHTML = `
+                <table class="table table-dark table-sm mb-0">
+                    <tr>
+                        <td><strong>SIP 伺服器</strong></td>
+                        <td>${settings.sip.server}:${settings.sip.port}</td>
+                    </tr>
+                    <tr>
+                        <td><strong>SIP 帳號</strong></td>
+                        <td>${settings.sip.username}</td>
+                    </tr>
+                    <tr>
+                        <td><strong>SIP 網域</strong></td>
+                        <td>${settings.sip.domain}</td>
+                    </tr>
+                    <tr>
+                        <td><strong>NFC 功能</strong></td>
+                        <td>${settings.nfc.enabled ? '<span class="text-success">已啟用</span>' : '<span class="text-danger">已停用</span>'}</td>
+                    </tr>
+                </table>
+            `;
+
+            // 硬體設定
+            document.getElementById('hardwareSettings').innerHTML = `
+                <div class="col-md-6">
+                    <h6>門鎖設定</h6>
+                    <table class="table table-dark table-sm">
+                        <tr>
+                            <td>GPIO 腳位</td>
+                            <td>GPIO ${settings.door.gpio_pin}</td>
+                        </tr>
+                        <tr>
+                            <td>開門時間</td>
+                            <td>${settings.door.unlock_duration} 秒</td>
+                        </tr>
+                    </table>
+                </div>
+                <div class="col-md-6">
+                    <h6>NFC 設定</h6>
+                    <table class="table table-dark table-sm">
+                        <tr>
+                            <td>功能狀態</td>
+                            <td>${settings.nfc.enabled ? '啟用' : '停用'}</td>
+                        </tr>
+                        <tr>
+                            <td>掃描間隔</td>
+                            <td>${settings.nfc.scan_interval} 秒</td>
+                        </tr>
+                    </table>
+                </div>
+            `;
+        } else {
+            document.getElementById('systemInfo').innerHTML = '<div class="text-danger">載入失敗</div>';
+        }
+    }
+
+    // 修改密碼
+    document.getElementById('passwordForm').addEventListener('submit', async function(e) {
+        e.preventDefault();
+
+        const formData = new FormData(this);
+        const newPassword = formData.get('new_password');
+        const confirmPassword = formData.get('confirm_password');
+
+        if (newPassword !== confirmPassword) {
+            showAlert('兩次輸入的密碼不一致', 'danger');
+            return;
+        }
+
+        const result = await apiCall('/api/settings/password', 'POST', {
+            old_password: formData.get('old_password'),
+            new_password: newPassword
+        });
+
+        if (result.success) {
+            showAlert('密碼修改成功', 'success');
+            this.reset();
+        } else {
+            showAlert(result.error || '密碼修改失敗', 'danger');
+        }
+    });
+
+    // 頁面載入時載入設定
+    document.addEventListener('DOMContentLoaded', () => {
+        loadSettings();
+        loadAudioSettings();
+    });
+
+    // 儲存單一公司
+    async function saveCompany(companyId) {
+        const row = document.querySelector(`tr[data-company-id="${companyId}"]`);
+        const name = row.querySelector('.company-name').value.trim();
+        const extension = row.querySelector('.company-extension').value.trim();
+        const floor = row.querySelector('.company-floor').value.trim();
+
+        if (!name) {
+            showAlert('請輸入公司名稱', 'danger');
+            return;
+        }
+
+        if (!extension) {
+            showAlert('請輸入分機號碼', 'danger');
+            return;
+        }
+
+        const result = await apiCall(`/api/companies/${companyId}`, 'PUT', {
+            name: name,
+            extension: extension,
+            floor: floor
+        });
+
+        if (result.success) {
+            showAlert(`公司 ${companyId} 更新成功`, 'success');
+            // 更新 data-original 屬性
+            row.querySelector('.company-name').dataset.original = name;
+            row.querySelector('.company-extension').dataset.original = extension;
+            row.querySelector('.company-floor').dataset.original = floor;
+        } else {
+            showAlert(result.error || '更新失敗', 'danger');
+        }
+    }
+
+    // ── 音訊設定 ──────────────────────────────────────────────────────────────
+
+    let _alsaMax = 147;
+
+    /** 將 ALSA value(0-147) 轉換為 dB 字串 */
+    function alsaToDB(val, max) {
+        if (val < 0) return '?';
+        const db = -28.37 + (val / max) * 27.43;
+        return db.toFixed(1) + ' dB';
+    }
+
+    /** 更新所有顯示標籤 */
+    function updateAudioLabels() {
+        const mic = parseInt(document.getElementById('micVolume').value);
+        const spk = parseInt(document.getElementById('spkVolume').value);
+        const ng  = parseInt(document.getElementById('noiseGate').value);
+        document.getElementById('micDb').textContent    = `(${alsaToDB(mic, _alsaMax)})`;
+        document.getElementById('micVolLabel').textContent = mic;
+        document.getElementById('spkDb').textContent    = `(${alsaToDB(spk, _alsaMax)})`;
+        document.getElementById('spkVolLabel').textContent = spk;
+        document.getElementById('noiseGateLabel').textContent = ng === 0 ? '關' : ng;
+    }
+
+    /** 從伺服器讀取音訊設定並填入控制項 */
+    async function loadAudioSettings() {
+        document.getElementById('audioLoading').style.display = 'block';
+        document.getElementById('audioForm').style.display    = 'none';
+
+        const result = await apiCall('/api/audio');
+        document.getElementById('audioLoading').style.display = 'none';
+
+        if (!result.success) {
+            document.getElementById('audioLoading').innerHTML =
+                `<span class="text-danger">載入失敗: ${result.error || '未知錯誤'}</span>`;
+            document.getElementById('audioLoading').style.display = 'block';
+            return;
+        }
+
+        const d = result.data;
+        _alsaMax = d.alsa_max || 147;
+
+        document.getElementById('micVolume').max  = _alsaMax;
+        document.getElementById('spkVolume').max  = _alsaMax;
+
+        // 若裝置未連線（值為 -1），禁用該滑桿並標示提示
+        if (d.mic_volume < 0) {
+            document.getElementById('micVolume').disabled = true;
+            document.getElementById('micDb').textContent = '（裝置未連線）';
+            document.getElementById('micDb').className = 'text-warning ms-1';
+        } else {
+            document.getElementById('micVolume').value = d.mic_volume;
+        }
+
+        if (d.speaker_volume < 0) {
+            document.getElementById('spkVolume').disabled = true;
+            document.getElementById('spkDb').textContent = '（裝置未連線）';
+            document.getElementById('spkDb').className = 'text-warning ms-1';
+        } else {
+            document.getElementById('spkVolume').value = d.speaker_volume;
+        }
+
+        document.getElementById('noiseGate').value = d.noise_gate_threshold ?? 600;
+
+        updateAudioLabels();
+        document.getElementById('audioForm').style.display = 'block';
+    }
+
+    /** 儲存音訊設定到伺服器 */
+    async function saveAudioSettings() {
+        const micEl = document.getElementById('micVolume');
+        const spkEl = document.getElementById('spkVolume');
+        const payload = {
+            noise_gate_threshold: parseInt(document.getElementById('noiseGate').value),
+        };
+        if (!micEl.disabled) payload.mic_volume     = parseInt(micEl.value);
+        if (!spkEl.disabled) payload.speaker_volume = parseInt(spkEl.value);
+
+        const result = await apiCall('/api/audio', 'POST', payload);
+        if (result.success) {
+            showAlert('音訊設定已儲存', 'success');
+        } else {
+            showAlert(result.error || '儲存失敗', 'danger');
+        }
+    }
+
+    // ── 公司設定 ──────────────────────────────────────────────────────────────
+
+    // 儲存所有公司
+    async function saveAllCompanies() {
+        const rows = document.querySelectorAll('#companiesTable tbody tr');
+        let successCount = 0;
+        let errorCount = 0;
+
+        for (const row of rows) {
+            const companyId = row.dataset.companyId;
+            const name = row.querySelector('.company-name').value.trim();
+            const extension = row.querySelector('.company-extension').value.trim();
+            const floor = row.querySelector('.company-floor').value.trim();
+
+            // 檢查是否有變更
+            const originalName = row.querySelector('.company-name').dataset.original;
+            const originalExt = row.querySelector('.company-extension').dataset.original;
+            const originalFloor = row.querySelector('.company-floor').dataset.original;
+
+            if (name === originalName && extension === originalExt && floor === originalFloor) {
+                continue; // 沒有變更，跳過
+            }
+
+            if (!name || !extension) {
+                errorCount++;
+                continue;
+            }
+
+            const result = await apiCall(`/api/companies/${companyId}`, 'PUT', {
+                name: name,
+                extension: extension,
+                floor: floor
+            });
+
+            if (result.success) {
+                successCount++;
+                row.querySelector('.company-name').dataset.original = name;
+                row.querySelector('.company-extension').dataset.original = extension;
+                row.querySelector('.company-floor').dataset.original = floor;
+            } else {
+                errorCount++;
+            }
+        }
+
+        if (successCount > 0) {
+            showAlert(`已更新 ${successCount} 間公司`, 'success');
+        } else if (errorCount > 0) {
+            showAlert(`${errorCount} 間公司更新失敗`, 'danger');
+        } else {
+            showAlert('沒有變更需要儲存', 'info');
+        }
+    }
+</script>
+{% endblock %}

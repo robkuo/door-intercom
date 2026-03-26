@@ -1,0 +1,16 @@
+[Unit]
+Description=Intercom Web Admin Interface
+After=network.target
+
+[Service]
+Type=simple
+User=rob
+WorkingDirectory=/home/rob/intercom_system
+ExecStart=/usr/bin/python3 /home/rob/intercom_system/web/app.py
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

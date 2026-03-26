@@ -1,0 +1,231 @@
+{% extends "base.html" %}
+
+{% block title %}NFC 管理 - 門禁系統管理{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2><i class="bi bi-credit-card"></i> NFC 卡片管理</h2>
+    {% if nfc_enabled %}
+    <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#registerModal">
+        <i class="bi bi-plus-lg"></i> 登錄新卡片
+    </button>
+    {% endif %}
+</div>
+
+{% if not nfc_enabled %}
+<div class="alert alert-warning">
+    <i class="bi bi-exclamation-triangle"></i> NFC 功能未啟用。請確認 PN532 模組已正確連接，並在 config.py 中設定 NFC_ENABLED = True
+</div>
+{% else %}
+
+<!-- NFC 卡片列表 -->
+<div class="card">
+    <div class="card-header">
+        <h5 class="mb-0">已登錄 NFC 卡片列表</h5>
+    </div>
+    <div class="card-body">
+        <div class="loading-spinner" id="loadingSpinner">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">載入中...</span>
+            </div>
+            <p class="mt-2">載入中...</p>
+        </div>
+
+        <div class="table-responsive" id="nfcTableContainer">
+            <table class="table table-dark table-striped table-hover">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>狀態</th>
+                        <th>持卡人</th>
+                        <th>所屬公司</th>
+                        <th>卡片 UID</th>
+                        <th>類型</th>
+                        <th>登錄時間</th>
+                        <th>最後使用</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody id="nfcTableBody">
+                </tbody>
+            </table>
+        </div>
+
+        <div id="noDataMessage" class="text-center text-secondary py-5" style="display: none;">
+            <i class="bi bi-credit-card-2-front" style="font-size: 3em;"></i>
+            <p class="mt-2">尚無登錄的 NFC 卡片</p>
+        </div>
+    </div>
+</div>
+
+<!-- 登錄新卡片 Modal -->
+<div class="modal fade" id="registerModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-credit-card"></i> 登錄新 NFC 卡片</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <form id="registerForm">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">持卡人姓名 <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" name="name" required placeholder="請輸入持卡人姓名">
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">所屬公司</label>
+                        <select class="form-select" name="company_id">
+                            <option value="0">-- 無 --</option>
+                            {% for company_id, info in companies.items() %}
+                            <option value="{{ company_id }}">{{ info.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="alert alert-info">
+                        <i class="bi bi-info-circle"></i>
+                        點擊「開始登錄」後，請在 15 秒內將 NFC 卡片靠近讀卡器
+                    </div>
+
+                    <div id="registerStatus" class="text-center py-3" style="display: none;">
+                        <div class="spinner-border text-primary" role="status"></div>
+                        <p class="mt-2 mb-0" id="registerStatusText">等待卡片感應中...</p>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-primary" id="registerBtn">
+                        <i class="bi bi-broadcast"></i> 開始登錄
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    {% if nfc_enabled %}
+    // 載入 NFC 卡片列表
+    async function loadNfcCards() {
+        document.getElementById('loadingSpinner').style.display = 'block';
+        document.getElementById('nfcTableContainer').style.display = 'none';
+        document.getElementById('noDataMessage').style.display = 'none';
+
+        const result = await apiCall('/api/nfc');
+
+        document.getElementById('loadingSpinner').style.display = 'none';
+
+        if (result.success) {
+            const tbody = document.getElementById('nfcTableBody');
+            tbody.innerHTML = '';
+
+            if (result.data.length === 0) {
+                document.getElementById('noDataMessage').style.display = 'block';
+            } else {
+                document.getElementById('nfcTableContainer').style.display = 'block';
+
+                result.data.forEach(card => {
+                    const statusBadge = card.active
+                        ? '<span class="badge badge-active">啟用</span>'
+                        : '<span class="badge badge-inactive">停用</span>';
+
+                    const toggleBtn = card.active
+                        ? `<button class="btn btn-sm btn-warning" onclick="toggleCard(${card.id}, false)"><i class="bi bi-pause"></i></button>`
+                        : `<button class="btn btn-sm btn-success" onclick="toggleCard(${card.id}, true)"><i class="bi bi-play"></i></button>`;
+
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                        <td>${card.id}</td>
+                        <td>${statusBadge}</td>
+                        <td><i class="bi bi-person"></i> ${card.name}</td>
+                        <td>${card.company_name}</td>
+                        <td><code>${card.uid.substring(0, 8)}...</code></td>
+                        <td>${card.card_type || 'card'}</td>
+                        <td>${card.created_at || '-'}</td>
+                        <td>${card.last_used || '-'}</td>
+                        <td>
+                            ${toggleBtn}
+                            <button class="btn btn-sm btn-danger" onclick="deleteCard(${card.id}, '${card.name}')">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </td>
+                    `;
+                    tbody.appendChild(row);
+                });
+            }
+        } else {
+            showAlert(result.error || '載入失敗', 'danger');
+        }
+    }
+
+    // 刪除卡片
+    async function deleteCard(id, name) {
+        if (!confirmAction(`確定要刪除「${name}」的 NFC 卡片嗎？`)) {
+            return;
+        }
+
+        const result = await apiCall(`/api/nfc/${id}`, 'DELETE');
+
+        if (result.success) {
+            showAlert('刪除成功', 'success');
+            loadNfcCards();
+        } else {
+            showAlert(result.error || '刪除失敗', 'danger');
+        }
+    }
+
+    // 停用/啟用卡片
+    async function toggleCard(id, active) {
+        const action = active ? '啟用' : '停用';
+        const result = await apiCall(`/api/nfc/${id}/toggle`, 'PATCH', { active: active });
+
+        if (result.success) {
+            showAlert(`卡片已${action}`, 'success');
+            loadNfcCards();
+        } else {
+            showAlert(result.error || '操作失敗', 'danger');
+        }
+    }
+
+    // 登錄表單提交
+    document.getElementById('registerForm').addEventListener('submit', async function(e) {
+        e.preventDefault();
+
+        const btn = document.getElementById('registerBtn');
+        const statusDiv = document.getElementById('registerStatus');
+        const statusText = document.getElementById('registerStatusText');
+
+        btn.disabled = true;
+        statusDiv.style.display = 'block';
+        statusText.textContent = '等待卡片感應中... (15 秒內請將卡片靠近讀卡器)';
+
+        const formData = new FormData(this);
+        const data = {
+            name: formData.get('name'),
+            company_id: parseInt(formData.get('company_id')) || 0
+        };
+
+        const result = await apiCall('/api/nfc/register', 'POST', data);
+
+        statusDiv.style.display = 'none';
+        btn.disabled = false;
+
+        if (result.success) {
+            showAlert(result.message || '登錄成功', 'success');
+            bootstrap.Modal.getInstance(document.getElementById('registerModal')).hide();
+            this.reset();
+            loadNfcCards();
+        } else {
+            showAlert(result.error || '登錄失敗', 'danger');
+        }
+    });
+
+    // 頁面載入時載入列表
+    document.addEventListener('DOMContentLoaded', loadNfcCards);
+    {% endif %}
+</script>
+{% endblock %}

@@ -1,0 +1,225 @@
+{% extends "base.html" %}
+
+{% block title %}存取日誌 - 門禁系統管理{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2><i class="bi bi-journal-text"></i> 存取日誌</h2>
+    <button class="btn btn-secondary" onclick="exportLogs()">
+        <i class="bi bi-download"></i> 匯出 CSV
+    </button>
+</div>
+
+<!-- 篩選條件 -->
+<div class="card mb-4">
+    <div class="card-body">
+        <form id="filterForm" class="row g-3">
+            <div class="col-md-3">
+                <label class="form-label">類型</label>
+                <select class="form-select" name="type">
+                    <option value="">全部</option>
+                    <option value="face_access">人臉開門</option>
+                    <option value="nfc_access">NFC 開門</option>
+                    <option value="dtmf_access">遠端開門 (DTMF)</option>
+                    <option value="face_enroll">人臉登錄</option>
+                    <option value="face_delete">人臉刪除</option>
+                    <option value="nfc_enroll">NFC 登錄</option>
+                    <option value="nfc_delete">NFC 刪除</option>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">開始日期</label>
+                <input type="date" class="form-control" name="start_date">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">結束日期</label>
+                <input type="date" class="form-control" name="end_date">
+            </div>
+            <div class="col-md-3 d-flex align-items-end">
+                <button type="submit" class="btn btn-primary me-2">
+                    <i class="bi bi-search"></i> 查詢
+                </button>
+                <button type="button" class="btn btn-outline-secondary" onclick="clearFilter()">
+                    <i class="bi bi-x-lg"></i> 清除
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- 日誌列表 -->
+<div class="card">
+    <div class="card-body">
+        <div class="loading-spinner" id="loadingSpinner">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">載入中...</span>
+            </div>
+            <p class="mt-2">載入中...</p>
+        </div>
+
+        <div class="table-responsive" id="logTableContainer">
+            <table class="table table-dark table-striped table-hover">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>類型</th>
+                        <th>使用者</th>
+                        <th>結果</th>
+                        <th>詳細資訊</th>
+                        <th>時間</th>
+                    </tr>
+                </thead>
+                <tbody id="logTableBody">
+                </tbody>
+            </table>
+        </div>
+
+        <div id="noDataMessage" class="text-center text-secondary py-5" style="display: none;">
+            <i class="bi bi-journal-x" style="font-size: 3em;"></i>
+            <p class="mt-2">沒有符合條件的日誌記錄</p>
+        </div>
+
+        <!-- 分頁 -->
+        <nav id="paginationContainer" style="display: none;">
+            <ul class="pagination justify-content-center" id="pagination">
+            </ul>
+        </nav>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    let currentPage = 1;
+    const perPage = 50;
+
+    // 類型對應中文
+    const typeLabels = {
+        'face_access': '<span class="badge bg-success"><i class="bi bi-person-check"></i> 人臉開門</span>',
+        'nfc_access': '<span class="badge bg-primary"><i class="bi bi-credit-card"></i> NFC 開門</span>',
+        'dtmf_access': '<span class="badge bg-info"><i class="bi bi-telephone"></i> 遠端開門</span>',
+        'face_enroll': '<span class="badge bg-secondary"><i class="bi bi-person-plus"></i> 人臉登錄</span>',
+        'face_delete': '<span class="badge bg-danger"><i class="bi bi-person-x"></i> 人臉刪除</span>',
+        'nfc_enroll': '<span class="badge bg-secondary"><i class="bi bi-credit-card-2-front"></i> NFC 登錄</span>',
+        'nfc_delete': '<span class="badge bg-danger"><i class="bi bi-credit-card-2-back"></i> NFC 刪除</span>'
+    };
+
+    // 結果對應
+    const resultLabels = {
+        'success': '<span class="badge bg-success">成功</span>',
+        'failed': '<span class="badge bg-danger">失敗</span>',
+        'denied': '<span class="badge bg-warning">拒絕</span>'
+    };
+
+    // 載入日誌
+    async function loadLogs(page = 1) {
+        currentPage = page;
+
+        document.getElementById('loadingSpinner').style.display = 'block';
+        document.getElementById('logTableContainer').style.display = 'none';
+        document.getElementById('noDataMessage').style.display = 'none';
+        document.getElementById('paginationContainer').style.display = 'none';
+
+        const formData = new FormData(document.getElementById('filterForm'));
+        const params = new URLSearchParams();
+        params.append('page', page);
+        params.append('per_page', perPage);
+
+        if (formData.get('type')) params.append('type', formData.get('type'));
+        if (formData.get('start_date')) params.append('start_date', formData.get('start_date'));
+        if (formData.get('end_date')) params.append('end_date', formData.get('end_date'));
+
+        const result = await apiCall(`/api/logs?${params.toString()}`);
+
+        document.getElementById('loadingSpinner').style.display = 'none';
+
+        if (result.success) {
+            const tbody = document.getElementById('logTableBody');
+            tbody.innerHTML = '';
+
+            if (result.data.length === 0) {
+                document.getElementById('noDataMessage').style.display = 'block';
+            } else {
+                document.getElementById('logTableContainer').style.display = 'block';
+
+                result.data.forEach(log => {
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                        <td>${log.id}</td>
+                        <td>${typeLabels[log.access_type] || log.access_type}</td>
+                        <td>${log.user_name || '-'}</td>
+                        <td>${resultLabels[log.result] || log.result}</td>
+                        <td><small>${log.details || '-'}</small></td>
+                        <td><small>${log.timestamp}</small></td>
+                    `;
+                    tbody.appendChild(row);
+                });
+
+                // 建立分頁
+                if (result.pagination.pages > 1) {
+                    buildPagination(result.pagination);
+                    document.getElementById('paginationContainer').style.display = 'block';
+                }
+            }
+        } else {
+            showAlert(result.error || '載入失敗', 'danger');
+        }
+    }
+
+    // 建立分頁
+    function buildPagination(pagination) {
+        const ul = document.getElementById('pagination');
+        ul.innerHTML = '';
+
+        // 上一頁
+        const prevLi = document.createElement('li');
+        prevLi.className = `page-item ${pagination.page <= 1 ? 'disabled' : ''}`;
+        prevLi.innerHTML = `<a class="page-link" href="#" onclick="loadLogs(${pagination.page - 1}); return false;">上一頁</a>`;
+        ul.appendChild(prevLi);
+
+        // 頁碼
+        const startPage = Math.max(1, pagination.page - 2);
+        const endPage = Math.min(pagination.pages, pagination.page + 2);
+
+        for (let i = startPage; i <= endPage; i++) {
+            const li = document.createElement('li');
+            li.className = `page-item ${i === pagination.page ? 'active' : ''}`;
+            li.innerHTML = `<a class="page-link" href="#" onclick="loadLogs(${i}); return false;">${i}</a>`;
+            ul.appendChild(li);
+        }
+
+        // 下一頁
+        const nextLi = document.createElement('li');
+        nextLi.className = `page-item ${pagination.page >= pagination.pages ? 'disabled' : ''}`;
+        nextLi.innerHTML = `<a class="page-link" href="#" onclick="loadLogs(${pagination.page + 1}); return false;">下一頁</a>`;
+        ul.appendChild(nextLi);
+    }
+
+    // 匯出日誌
+    function exportLogs() {
+        const formData = new FormData(document.getElementById('filterForm'));
+        const params = new URLSearchParams();
+
+        if (formData.get('type')) params.append('type', formData.get('type'));
+        if (formData.get('start_date')) params.append('start_date', formData.get('start_date'));
+        if (formData.get('end_date')) params.append('end_date', formData.get('end_date'));
+
+        window.location.href = `/api/logs/export?${params.toString()}`;
+    }
+
+    // 清除篩選
+    function clearFilter() {
+        document.getElementById('filterForm').reset();
+        loadLogs(1);
+    }
+
+    // 篩選表單提交
+    document.getElementById('filterForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+        loadLogs(1);
+    });
+
+    // 頁面載入時載入日誌
+    document.addEventListener('DOMContentLoaded', () => loadLogs(1));
+</script>
+{% endblock %}

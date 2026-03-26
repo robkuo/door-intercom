@@ -1,0 +1,17 @@
+# 門口對講機系統 - Python 依賴套件
+# 在樹莓派上安裝: pip install -r requirements.txt
+
+# GUI
+# tkinter 通常已內建於 Python
+
+# 指紋模組 (R307/R503)
+pyfingerprint>=1.5
+
+# GPIO 控制 (樹莓派專用)
+# RPi.GPIO>=0.7.0  # 取消註解以在樹莓派上使用
+
+# SIP/VoIP 通話
+# pjsua2 需要從原始碼編譯，請參考安裝說明
+
+# 資料庫
+# sqlite3 已內建於 Python
