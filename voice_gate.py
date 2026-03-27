@@ -116,9 +116,35 @@ def _detect_capture_device() -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 # 音訊播放
 # ─────────────────────────────────────────────────────────────────────────────
+_audio_proc: "subprocess.Popen | None" = None
+_audio_proc_lock = threading.Lock()
+
+
 def _aplay(wav_path: str):
+    """播放 WAV 檔，同時追蹤執行中的 process（讓 stop_audio() 可以中斷）"""
+    global _audio_proc
     cmd = ["aplay", "-q", "-D", f"plughw:{PLAYBACK_CARD}", wav_path]
-    subprocess.run(cmd, check=False)
+    proc = subprocess.Popen(cmd)
+    with _audio_proc_lock:
+        _audio_proc = proc
+    proc.wait()
+    with _audio_proc_lock:
+        if _audio_proc is proc:
+            _audio_proc = None
+
+
+def stop_audio():
+    """立刻中斷正在播放的音訊（按鈕按下時呼叫，清除 TTS 佔用）"""
+    global _audio_proc
+    with _audio_proc_lock:
+        proc = _audio_proc
+        _audio_proc = None
+    if proc and proc.poll() is None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=0.3)
+        except subprocess.TimeoutExpired:
+            proc.kill()
 
 
 def beep(freq: int = 880, duration_ms: int = 150, volume: float = 0.7):
@@ -485,6 +511,9 @@ def on_pressed():
     with _state_lock:
         _state = "RECORDING"
 
+    # 立刻中斷正在播放的 TTS（否則 beep() 要等 TTS 結束才能佔用音訊裝置）
+    stop_audio()
+
     _stop_rec.clear()
     if os.path.exists(WAV_PATH):
         try:
@@ -493,7 +522,7 @@ def on_pressed():
             pass
 
     beep()              # 同步播放嗵聲 ~150ms
-    time.sleep(0.60)    # 等殘響消散，避免麥克風錄到嗵聲的回音
+    time.sleep(0.30)    # 等殘響消散（縮短到 300ms，beep 已有 fade-out，回音短）
 
     rec = threading.Thread(target=record_audio, daemon=True)
     rec.start()
