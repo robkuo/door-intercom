@@ -302,7 +302,9 @@ class IntercomSystem:
             self.root.after(DOOR_REQUEST_POLL_INTERVAL, self._poll_voice_call_queue)
             return
         try:
-            conn = sqlite3.connect(WEB_ADMIN_DB_PATH, timeout=5)
+            # isolation_level=None → autocommit 模式；所有事務用明確 BEGIN/COMMIT 控制
+            # 這樣清理 UPDATE 和 BEGIN IMMEDIATE claim 不會互相衝突
+            conn = sqlite3.connect(WEB_ADMIN_DB_PATH, timeout=5, isolation_level=None)
             cursor = conn.cursor()
             # 向下相容：補欄位（已存在則略過）
             for ddl in (
@@ -314,7 +316,7 @@ class IntercomSystem:
                     cursor.execute(ddl)
                 except sqlite3.OperationalError:
                     pass
-            # 清理過期 pending（超過 freshness 視窗的舊請求）
+            # 清理過期 pending（超過 freshness 視窗的舊請求）—autocommit，不開隱式事務
             cursor.execute(
                 """
                 UPDATE voice_call_queue
@@ -324,7 +326,7 @@ class IntercomSystem:
                 """,
                 (VOICE_CALL_QUEUE_FRESH_S,),
             )
-            # 清理卡死 processing（main 崩潰後殘留的 processing 超過 TTL）
+            # 清理卡死 processing（main 崩潰後殘留的 processing 超過 TTL）—autocommit
             cursor.execute(
                 """
                 UPDATE voice_call_queue
@@ -335,6 +337,7 @@ class IntercomSystem:
                 """,
                 (VOICE_CALL_QUEUE_PROCESSING_TTL_S,),
             )
+            # 明確開啟 IMMEDIATE 事務做原子性 claim（isolation_level=None 下必須明確 BEGIN）
             cursor.execute("BEGIN IMMEDIATE")
             # created_at 是 localtime 字串，用 'utc' modifier 轉回 UTC 再與 now(UTC) 算秒差
             cursor.execute(
