@@ -122,6 +122,7 @@ class IntercomSystem:
         self._active_vcq_id: int = None
         self._active_vcq_extension: str = ""
         self._active_vcq_connected: bool = False
+        self._call_ended_flag: bool = False   # 通話已結束旗標，防止幽靈回撥（ghost callback）
 
         # 初始化硬體模組
         self._init_hardware()
@@ -408,6 +409,7 @@ class IntercomSystem:
             # 撥號
             self.logger.info(f"[VoiceGate] claim id={req_id} → 撥號 {name} (分機 {extension}) created_at={created_at}")
             self._call_ended_count = 0  # 每次新撥號前重置計數（包含撥號失敗的情況）
+            self._call_ended_flag = False  # 每次新撥號前重置幽靈回撥旗標
             self._current_outbound_extension = extension
             self._last_call_start_time = _time.time()  # 記錄撥號開始時間（防假陽性後快速重撥）
             # 記錄 active queue row（由 _on_call_ended finalize，保持 processing 做 busy 訊號）
@@ -531,6 +533,10 @@ class IntercomSystem:
 
     def _on_call_state_changed(self, state: CallState):
         """通話狀態變更"""
+        # 通話已結束後若收到 RINGING/CONNECTED，屬於幽靈回撥，直接忽略
+        if self._call_ended_flag and state in (CallState.RINGING, CallState.CONNECTED):
+            self.logger.warning(f"_on_call_state_changed：已標記結束，忽略幽靈狀態 {state.value}")
+            return
         state_map = {
             CallState.DIALING: 'dialing',
             CallState.RINGING: 'ringing',
@@ -542,6 +548,9 @@ class IntercomSystem:
 
     def _on_call_connected(self):
         """通話連接"""
+        if self._call_ended_flag:
+            self.logger.warning("_on_call_connected：已標記結束，忽略幽靈回撥")
+            return
         self._call_ended_count = 0  # 每次新通話重設計數
         self.logger.info("通話已連接")
         if self._active_vcq_id:
@@ -549,6 +558,7 @@ class IntercomSystem:
 
     def _on_call_ended(self):
         """通話結束"""
+        self._call_ended_flag = True   # 標記此通話已結束（防幽靈回撥觸發 connected 狀態）
         now = _time.time()
         # Idempotent guard：2 秒內重複呼叫直接忽略（防止 watchdog/多路徑重入）
         if self._call_ended_count > 0 and (now - self._last_call_end_time) < 2.0:
