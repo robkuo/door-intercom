@@ -532,7 +532,7 @@ class IntercomSystem:
         self.sip_client.answer_incoming_call()
 
     def _on_call_state_changed(self, state: CallState):
-        """通話狀態變更"""
+        """通話狀態變更（從 sip_client 背景執行緒呼叫，必須透過 root.after 更新 GUI）"""
         # 通話已結束後若收到 RINGING/CONNECTED，屬於幽靈回撥，直接忽略
         if self._call_ended_flag and state in (CallState.RINGING, CallState.CONNECTED):
             self.logger.warning(f"_on_call_state_changed：已標記結束，忽略幽靈狀態 {state.value}")
@@ -544,7 +544,17 @@ class IntercomSystem:
             CallState.DISCONNECTED: 'disconnected',
         }
         gui_state = state_map.get(state, 'dialing')
-        self.call_window.set_status(gui_state)
+
+        # ⚠️ Tkinter 非執行緒安全：必須排到主執行緒執行，避免 background thread 直接
+        # 呼叫 widget.config() 造成 2 分鐘阻塞（幽靈回撥的根本原因）
+        def _do_update():
+            # 延遲執行期間若通話已結束，再次過濾
+            if self._call_ended_flag and state in (CallState.RINGING, CallState.CONNECTED):
+                self.logger.warning(f"_on_call_state_changed[deferred]：已標記結束，忽略 {state.value}")
+                return
+            self.call_window.set_status(gui_state)
+
+        self.root.after(0, _do_update)
 
     def _on_call_connected(self):
         """通話連接"""
