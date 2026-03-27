@@ -75,9 +75,9 @@ def load_companies_from_db():
         return COMPANIES  # 發生錯誤，使用預設值
 from utils.logger import setup_logger, get_logger
 from door.lock_control import DoorLock
-from face.face_manager import FaceManager, FaceResult
+# [face recognition removed] from face.face_manager import FaceManager, FaceResult
 from nfc.nfc_manager import NFCManager, NFCResult
-from sip.sip_client import SIPClient, CallState
+from sip.baresip_client import BaresipClient as SIPClient, CallState  # switched to baresip for H.264 video
 from gui.main_window import MainWindow
 from gui.call_window import CallWindow
 from gui.password_window import PasswordWindow
@@ -134,8 +134,6 @@ class IntercomSystem:
         self._setup_callbacks()
 
         # 啟動人臉連續掃描
-        if self.face_manager:
-            self.face_manager.start_continuous_scan()
 
         # 啟動 NFC 連續掃描
         if self.nfc_manager:
@@ -153,17 +151,8 @@ class IntercomSystem:
             unlock_duration=DOOR_UNLOCK_DURATION
         )
 
-        # 人臉辨識（cv2.face 在新版 opencv-contrib 可能不可用，降級啟動）
-        try:
-            self.face_manager = FaceManager(
-                database_path=DATABASE_PATH,
-                confidence_threshold=80.0,
-                detection_interval=0.5
-            )
-            self.logger.info("人臉辨識初始化成功")
-        except Exception as e:
-            self.logger.warning(f"人臉辨識初始化失敗（已停用）: {e}")
-            self.face_manager = None
+        # 人臉辨識已完全移除
+        self.face_manager = None
 
         # NFC 讀卡器
         self.nfc_manager = None
@@ -443,9 +432,6 @@ class IntercomSystem:
     def _setup_callbacks(self):
         """設定回調函數"""
         # 人臉識別成功
-        if self.face_manager:
-            self.face_manager.set_on_face_detected(self._on_face_detected)
-            self.face_manager.set_on_unknown_face(self._on_unknown_face)
 
         # SIP 通話狀態
         self.sip_client.set_on_state_changed(self._on_call_state_changed)
@@ -469,16 +455,12 @@ class IntercomSystem:
         # 重設 SIP 狀態到 IDLE，確保下次來電偵測正常運作（持鎖，thread-safe）
         self.sip_client.reset_to_idle()
         # 恢復人臉掃描和 NFC 掃描
-        if self.face_manager:
-            self.face_manager.start_continuous_scan()
         if self.nfc_manager:
             self.nfc_manager.start_continuous_scan(self._on_nfc_scan)
 
     def _show_call(self, company_name: str):
         """顯示通話畫面"""
         # 關閉人臉掃描並釋放攝影機，供 Flask MJPEG 串流使用
-        if self.face_manager:
-            self.face_manager.cleanup()   # stop_continuous_scan + 釋放 Picamera2/V4L2
         self.main_window.hide()
         self.call_window.show(company_name)
 
@@ -657,8 +639,6 @@ class IntercomSystem:
         """密碼開門按鈕點擊"""
         self.logger.info("進入密碼開門畫面")
         # 暫停人臉和 NFC 掃描
-        if self.face_manager:
-            self.face_manager.stop_continuous_scan()
         if self.nfc_manager:
             self.nfc_manager.stop_continuous_scan()
         # 切換畫面
@@ -790,8 +770,6 @@ class IntercomSystem:
         self.logger.info("系統關閉中...")
 
         # 停止人臉掃描和 NFC 掃描
-        if self.face_manager:
-            self.face_manager.stop_continuous_scan()
         if self.nfc_manager:
             self.nfc_manager.stop_continuous_scan()
 
@@ -800,8 +778,6 @@ class IntercomSystem:
             self.sip_client.hangup()
 
         # 清理資源
-        if self.face_manager:
-            self.face_manager.cleanup()
         if self.nfc_manager:
             self.nfc_manager.cleanup()
         self.sip_client.cleanup()
