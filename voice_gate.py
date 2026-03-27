@@ -11,6 +11,7 @@ import json
 import logging
 import math
 import os
+import signal
 import sqlite3
 import struct
 import subprocess
@@ -72,6 +73,7 @@ PHRASES = {
     "fail":    "抱歉，我聽不清楚，請再按一次按鈕說話",
     "network": "網路連線異常，請稍後再試",
     "short":   "按鈕時間太短，請按住按鈕說完再放開",
+    "mic_busy":"麥克風暫時忙碌，請稍後再試",
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -207,20 +209,47 @@ def _precache_tts():
 # ─────────────────────────────────────────────────────────────────────────────
 # 錄音
 # ─────────────────────────────────────────────────────────────────────────────
+_active_pcm = None          # 供 SIGTERM handler 關閉 ALSA
+_active_pcm_lock = threading.Lock()
+
 def record_audio() -> bool:
+    global _active_pcm
     log.info("錄音開始...")
     frames = []
     start = time.monotonic()
+
+    # 重試開啟 ALSA（最多 6 次，每次等 0.5s）
+    # 原因：前次 voice_gate 被 SIGKILL 時可能留下 zombie PCM handle
+    pcm = None
+    for attempt in range(6):
+        try:
+            pcm = alsaaudio.PCM(
+                alsaaudio.PCM_CAPTURE,
+                alsaaudio.PCM_NORMAL,
+                device=CAPTURE_DEVICE,
+                channels=CHANNELS,
+                rate=SAMPLE_RATE,
+                format=FORMAT,
+                periodsize=PERIOD_SIZE,
+            )
+            break
+        except Exception as e:
+            if 'busy' in str(e).lower() or 'resource' in str(e).lower():
+                if attempt < 5:
+                    log.warning(f"麥克風忙碌，重試 {attempt+1}/6: {e}")
+                    time.sleep(0.5)
+                    continue
+            log.error(f"錄音失敗: {e}")
+            return False
+
+    if pcm is None:
+        log.error("錄音失敗：麥克風仍忙碌，放棄")
+        return False
+
+    with _active_pcm_lock:
+        _active_pcm = pcm
+
     try:
-        pcm = alsaaudio.PCM(
-            alsaaudio.PCM_CAPTURE,
-            alsaaudio.PCM_NORMAL,
-            device=CAPTURE_DEVICE,
-            channels=CHANNELS,
-            rate=SAMPLE_RATE,
-            format=FORMAT,
-            periodsize=PERIOD_SIZE,
-        )
         while not _stop_rec.is_set():
             if time.monotonic() - start >= MAX_RECORD_S:
                 log.warning("超過最長錄音時間，自動截斷")
@@ -228,10 +257,13 @@ def record_audio() -> bool:
             n, data = pcm.read()
             if n > 0:
                 frames.append(data)
-        pcm.close()
-    except Exception as e:
-        log.error(f"錄音失敗: {e}")
-        return False
+    finally:
+        with _active_pcm_lock:
+            _active_pcm = None
+        try:
+            pcm.close()
+        except Exception:
+            pass
 
     duration = time.monotonic() - start
     log.info(f"錄音結束，時長 {duration:.2f}s")
@@ -451,10 +483,12 @@ def _ensure_call_queue_table():
 def session_thread(rec_thread: threading.Thread):
     global _state
 
-    rec_thread.join(timeout=MAX_RECORD_S + 2)
+    rec_thread.join(timeout=MAX_RECORD_S + 8)  # +8: 含重試等待時間
 
     if not os.path.exists(WAV_PATH):
-        speak(PHRASES["short"])
+        # 若是麥克風忙碌（重試失敗），給不同提示
+        phrase = PHRASES["mic_busy"] if _stop_rec.is_set() else PHRASES["short"]
+        speak(phrase)
         with _state_lock:
             _state = "IDLE"
         speak(PHRASES["ready"])
@@ -575,6 +609,22 @@ def main():
     log.info(f"錄音裝置: {CAPTURE_DEVICE}")
     log.info(f"播放裝置: plughw:{PLAYBACK_CARD}")
 
+    # SIGTERM handler：systemd 重啟前正確釋放 ALSA，防止 zombie PCM handle
+    def _sigterm_handler(signum, frame):
+        log.info("收到 SIGTERM，正在釋放音訊資源...")
+        stop_audio()                    # 停止正在播放的 TTS
+        _stop_rec.set()                 # 停止錄音迴圈
+        with _active_pcm_lock:
+            if _active_pcm is not None:
+                try:
+                    _active_pcm.close()
+                    log.info("ALSA PCM 已關閉")
+                except Exception:
+                    pass
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, _sigterm_handler)
+
     btn = Button(BUTTON_PIN, pull_up=False, bounce_time=DEBOUNCE_S)
     btn.when_pressed  = on_pressed
     btn.when_released = on_released
@@ -590,6 +640,7 @@ def main():
     except KeyboardInterrupt:
         log.info("中斷")
     finally:
+        stop_audio()
         btn.close()
 
 
