@@ -504,9 +504,11 @@ class SIPClient:
         只從 CoreShowChannels 回應的 Event: CoreShowChannel block 判斷通道狀態。
         只比對 Channel: 欄位（避免 BridgedChannel:/ConnectedLineNum: 等欄位誤中）。
         忽略後續流入的 RTCPSent/VarSet/Hangup 事件（它們也含頻道名稱，會造成假陽性）。
+        回傳: (has_active, is_up, full_channel_name)
         """
         has_active = False
         is_up = False
+        found_channel = ""
         prefix = f"PJSIP/{extension}"
         for block in response.split("\r\n\r\n"):
             if "Event: CoreShowChannel" not in block:
@@ -522,10 +524,12 @@ class SIPClient:
             if not channel_val.startswith(prefix):
                 continue
             has_active = True
+            if not found_channel:
+                found_channel = channel_val  # 記錄完整 channel name（如 PJSIP/105-00000018）
             if channel_state == "Up":
                 is_up = True
                 self.logger.info(f"[monitor] 通道 Up 偵測: {channel_val} state={channel_state}")
-        return has_active, is_up
+        return has_active, is_up, found_channel
 
     def _monitor_call(self, extension: str):
         """監控通話狀態和 DTMF 開門事件"""
@@ -546,7 +550,12 @@ class SIPClient:
                     continue
 
                 # 只解析 Event: CoreShowChannel block，忽略殘留的 RTCP/Hangup 事件
-                has_pjsip, pjsip_up = self._parse_active_channels(response, extension)
+                has_pjsip, pjsip_up, full_channel = self._parse_active_channels(response, extension)
+
+                # 一旦偵測到完整 channel name，更新 _current_call 以便 hangup() 精確掛斷
+                if full_channel and full_channel != self._current_call:
+                    self._current_call = full_channel
+                    self.logger.info(f"[monitor] 更新 _current_call: {full_channel}")
 
                 # 檢查是否已接聽（PJSIP Up）
                 # 前 3 秒忽略 Up 偵測（Asterisk 初始化通道時可能瞬間出現 Up）
@@ -613,13 +622,36 @@ class SIPClient:
                 self.logger.error(f"掛斷 Console 失敗: {e}")
 
             # 掛斷 PJSIP 通道
+            # _current_call 可能是 "105"（extension）或完整名稱 "PJSIP/105-00000018"
             if self._current_call:
                 try:
-                    response = self._ami_send({
-                        "Action": "Command",
-                        "Command": f"channel request hangup PJSIP/{self._current_call}"
-                    })
-                    self.logger.info(f"掛斷通話: {response[:100].strip() if response else 'no response'}")
+                    # 優先使用 AMI Hangup action（需要完整 channel name）
+                    if self._current_call.startswith("PJSIP/") and "-" in self._current_call:
+                        # 已有完整 channel name，使用 AMI Hangup（精確）
+                        response = self._ami_send({
+                            "Action": "Hangup",
+                            "Channel": self._current_call,
+                            "Cause": "16"
+                        })
+                        self.logger.info(f"AMI Hangup {self._current_call}: {response[:100].strip() if response else 'no response'}")
+                    else:
+                        # 只有 extension，查 CoreShowChannels 找完整 channel name
+                        cs_resp = self._ami_send({"Action": "CoreShowChannels"})
+                        _, _, full_ch = self._parse_active_channels(cs_resp, self._current_call)
+                        if full_ch:
+                            response = self._ami_send({
+                                "Action": "Hangup",
+                                "Channel": full_ch,
+                                "Cause": "16"
+                            })
+                            self.logger.info(f"AMI Hangup (查找) {full_ch}: {response[:100].strip() if response else 'no response'}")
+                        else:
+                            # fallback：CLI command
+                            response = self._ami_send({
+                                "Action": "Command",
+                                "Command": f"channel request hangup PJSIP/{self._current_call}"
+                            })
+                            self.logger.info(f"掛斷通話 (fallback): {response[:100].strip() if response else 'no response'}")
                 except Exception as e:
                     self.logger.error(f"掛斷失敗: {e}")
 
