@@ -5,8 +5,8 @@
 
 功能：
 1. 觸控選擇 8 間公司撥打 SIP 電話
-2. 人臉辨識開門
-3. 通話中遠端開門（DTMF）
+2. 通話中遠端開門（DTMF）
+3. NFC 卡片開門、密碼開門
 """
 
 import tkinter as tk
@@ -75,7 +75,6 @@ def load_companies_from_db():
         return COMPANIES  # 發生錯誤，使用預設值
 from utils.logger import setup_logger, get_logger
 from door.lock_control import DoorLock
-from face.face_manager import FaceManager, FaceResult
 from nfc.nfc_manager import NFCManager, NFCResult
 from sip.sip_client import SIPClient, CallState
 from gui.main_window import MainWindow
@@ -132,10 +131,6 @@ class IntercomSystem:
         # 設定回調
         self._setup_callbacks()
 
-        # 啟動人臉連續掃描
-        if self.face_manager:
-            self.face_manager.start_continuous_scan()
-
         # 啟動 NFC 連續掃描
         if self.nfc_manager:
             self.nfc_manager.start_continuous_scan(self._on_nfc_scan)
@@ -151,18 +146,6 @@ class IntercomSystem:
             relay_pin=GPIO_RELAY_PIN,
             unlock_duration=DOOR_UNLOCK_DURATION
         )
-
-        # 人臉辨識（cv2.face 在新版 opencv-contrib 可能不可用，降級啟動）
-        try:
-            self.face_manager = FaceManager(
-                database_path=DATABASE_PATH,
-                confidence_threshold=80.0,
-                detection_interval=0.5
-            )
-            self.logger.info("人臉辨識初始化成功")
-        except Exception as e:
-            self.logger.warning(f"人臉辨識初始化失敗（已停用）: {e}")
-            self.face_manager = None
 
         # NFC 讀卡器
         self.nfc_manager = None
@@ -440,11 +423,6 @@ class IntercomSystem:
 
     def _setup_callbacks(self):
         """設定回調函數"""
-        # 人臉識別成功
-        if self.face_manager:
-            self.face_manager.set_on_face_detected(self._on_face_detected)
-            self.face_manager.set_on_unknown_face(self._on_unknown_face)
-
         # SIP 通話狀態
         self.sip_client.set_on_state_changed(self._on_call_state_changed)
         self.sip_client.set_on_dtmf_received(self._on_dtmf_received)
@@ -466,17 +444,12 @@ class IntercomSystem:
         self.main_window.show()
         # 重設 SIP 狀態到 IDLE，確保下次來電偵測正常運作（持鎖，thread-safe）
         self.sip_client.reset_to_idle()
-        # 恢復人臉掃描和 NFC 掃描
-        if self.face_manager:
-            self.face_manager.start_continuous_scan()
+        # 恢復 NFC 掃描
         if self.nfc_manager:
             self.nfc_manager.start_continuous_scan(self._on_nfc_scan)
 
     def _show_call(self, company_name: str):
         """顯示通話畫面"""
-        # 關閉人臉掃描並釋放攝影機，供 Flask MJPEG 串流使用
-        if self.face_manager:
-            self.face_manager.cleanup()   # stop_continuous_scan + 釋放 Picamera2/V4L2
         self.main_window.hide()
         self.call_window.show(company_name)
 
@@ -610,21 +583,6 @@ class IntercomSystem:
             self._unlock_door()
             self.call_window.show_door_opened()
 
-    def _on_face_detected(self, user):
-        """人臉識別成功"""
-        self.logger.info(f"人臉識別成功: {user.name}")
-
-        # 開門
-        self._unlock_door()
-
-        # 顯示提示
-        self.main_window.show_message(f"歡迎 {user.name}！", "success")
-
-    def _on_unknown_face(self):
-        """未知人臉"""
-        self.logger.warning("未登錄的人臉")
-        # 不顯示錯誤訊息，避免干擾訪客
-
     def _unlock_door(self):
         """開門"""
         self.logger.info("執行開門")
@@ -636,9 +594,7 @@ class IntercomSystem:
     def _on_password_click(self):
         """密碼開門按鈕點擊"""
         self.logger.info("進入密碼開門畫面")
-        # 暫停人臉和 NFC 掃描
-        if self.face_manager:
-            self.face_manager.stop_continuous_scan()
+        # 暫停 NFC 掃描
         if self.nfc_manager:
             self.nfc_manager.stop_continuous_scan()
         # 切換畫面
@@ -769,9 +725,7 @@ class IntercomSystem:
         """關閉系統"""
         self.logger.info("系統關閉中...")
 
-        # 停止人臉掃描和 NFC 掃描
-        if self.face_manager:
-            self.face_manager.stop_continuous_scan()
+        # 停止 NFC 掃描
         if self.nfc_manager:
             self.nfc_manager.stop_continuous_scan()
 
@@ -780,8 +734,6 @@ class IntercomSystem:
             self.sip_client.hangup()
 
         # 清理資源
-        if self.face_manager:
-            self.face_manager.cleanup()
         if self.nfc_manager:
             self.nfc_manager.cleanup()
         self.sip_client.cleanup()
