@@ -82,6 +82,15 @@ class FaceManager:
         # 攝影機
         self._camera = None
         self._camera_lock = threading.Lock()
+        # camera health / retry
+        self._camera_failures = 0
+        self._camera_last_error = ""
+        self._camera_reset_after_failures = 5
+        # USB camera preferred settings
+        self._usb_width = 640
+        self._usb_height = 480
+        self._usb_fps = 30
+        self._usb_fourcc = "MJPG"
 
         # 已知使用者
         self._known_users: dict = {}  # label -> FaceUser
@@ -158,6 +167,53 @@ class FaceManager:
         # 相機在需要時才啟動，這裡只記錄
         self.logger.info("相機將在首次使用時初始化")
 
+    def _reset_camera(self, reason: str = ""):
+        """釋放並重置相機（用於 read 失敗後自癒）"""
+        with self._camera_lock:
+            try:
+                if self._camera:
+                    if hasattr(self._camera, "stop"):
+                        try:
+                            self._camera.stop(); self._camera.close()
+                        except Exception:
+                            pass
+                    elif hasattr(self._camera, "release"):
+                        try:
+                            self._camera.release()
+                        except Exception:
+                            pass
+            finally:
+                self._camera = None
+                self._camera_failures = 0
+                self._camera_last_error = ""
+        if reason:
+            self.logger.warning(f"[Camera] reset: {reason}")
+
+    def _open_usb_camera(self, idx: int):
+        """以穩定參數打開 USB 攝影機，并用 warmup read 驗證"""
+        backend = cv2.CAP_V4L2 if hasattr(cv2, "CAP_V4L2") else 0
+        cap = cv2.VideoCapture(idx, backend) if backend else cv2.VideoCapture(idx)
+        if not cap.isOpened():
+            cap.release(); return None
+        try:
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, self._usb_width)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self._usb_height)
+            cap.set(cv2.CAP_PROP_FPS, self._usb_fps)
+            cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*self._usb_fourcc))
+            if hasattr(cv2, "CAP_PROP_BUFFERSIZE"):
+                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        except Exception:
+            pass
+        ok = False
+        for _ in range(8):
+            ret, frame = cap.read()
+            if ret and frame is not None and getattr(frame, "size", 0) > 0:
+                ok = True; break
+            time.sleep(0.1)
+        if not ok:
+            cap.release(); return None
+        return cap
+
     def _get_camera(self):
         """取得攝影機實例"""
         if self._camera is None:
@@ -176,16 +232,19 @@ class FaceManager:
                     raise ImportError("Picamera2 不可用")
             except Exception as e:
                 self.logger.warning(f"Picamera2 不可用: {e}")
-                # 退回使用 USB 攝影機（依序嘗試 /dev/video0~2）
+                # 退回使用 USB 攝影機（含參數設定+warmup 驗證）
                 opened = False
                 for idx in range(3):
-                    cap = cv2.VideoCapture(idx)
-                    if cap.isOpened():
+                    cap = self._open_usb_camera(idx)
+                    if cap is not None:
                         self._camera = cap
-                        self.logger.info(f"使用 USB 攝影機 /dev/video{idx}")
+                        self.logger.info(
+                            f"使用 USB 攝影機 /dev/video{idx} "
+                            f"({self._usb_fourcc} {self._usb_width}x"
+                            f"{self._usb_height}@{self._usb_fps})"
+                        )
                         opened = True
                         break
-                    cap.release()
                 if not opened:
                     self._camera = None
                     raise RuntimeError("無法開啟攝影機（/dev/video0~2 均失敗）")
@@ -253,22 +312,30 @@ class FaceManager:
         return len(self._known_user_ids)
 
     def capture_frame(self) -> Optional[np.ndarray]:
-        """擷取一張影像"""
+        """擷取一張影像（含連續失敗自癒機制）"""
         with self._camera_lock:
             try:
                 camera = self._get_camera()
-
                 # Picamera2
                 if hasattr(camera, 'capture_array'):
                     frame = camera.capture_array()
+                    self._camera_failures = 0
                     return cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
                 # OpenCV VideoCapture
                 else:
                     ret, frame = camera.read()
-                    return frame if ret else None
-
+                    if ret and frame is not None and getattr(frame, "size", 0) > 0:
+                        self._camera_failures = 0
+                        return frame
+                    self._camera_failures += 1
+                    if self._camera_failures >= self._camera_reset_after_failures:
+                        self._reset_camera(reason=f"read failed x{self._camera_failures}")
+                    return None
             except Exception as e:
                 self.logger.error(f"擷取影像失敗: {e}")
+                self._camera_failures += 1
+                if self._camera_failures >= self._camera_reset_after_failures:
+                    self._reset_camera(reason=f"exception: {e}")
                 return None
 
     def detect_faces(self, frame: np.ndarray) -> List[Tuple[int, int, int, int]]:
@@ -576,6 +643,9 @@ class FaceManager:
                 elif result == FaceResult.NO_FACE:
                     if self._on_no_face:
                         self._on_no_face()
+                else:
+                    # ERROR/UNKNOWN：避免 tight loop，給相機自癒緩衝時間
+                    time.sleep(1.0)
 
                 time.sleep(self.detection_interval)
 

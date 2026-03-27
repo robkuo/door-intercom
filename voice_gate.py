@@ -471,6 +471,19 @@ def _ensure_call_queue_table():
         # 加索引：加速 consumer 查詢與 producer 去重
         cur.execute("CREATE INDEX IF NOT EXISTS idx_vcq_status_created ON voice_call_queue(status, created_at)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_vcq_ext_status_created ON voice_call_queue(extension, status, created_at)")
+        # DB 層硬防護：同分機同時只允許一筆 active row（pending/processing）
+        try:
+            cur.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_vcq_active_ext "
+                "ON voice_call_queue(extension) "
+                "WHERE status IN ('pending', 'processing')"
+            )
+        except sqlite3.IntegrityError as e:
+            log.warning(
+                f"建立 uq_vcq_active_ext 失敗（已有重複 active row），"
+                f"請跑 migration 清理：{e}"
+            )
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_vcq_claimed_at ON voice_call_queue(claimed_at)")
         conn.commit()
         conn.close()
     except Exception as e:

@@ -235,8 +235,11 @@ class SIPClient:
         self.logger.info("AMI 事件監聽執行緒已啟動")
 
     def _event_listener_loop(self):
-        """AMI 事件監聽迴圈（持續連線，重連失敗後等待 5 秒）"""
+        """AMI 事件監聽迴圈（持續連線；失敗採指數退避，避免固定頻率狂重連）"""
+        backoff = 5.0
+        backoff_max = 60.0
         while not self._stop_monitor:
+            ev_sock = None
             try:
                 ev_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 ev_sock.settimeout(5)
@@ -267,8 +270,13 @@ class SIPClient:
 
                 if b"Success" not in resp:
                     ev_sock.close()
-                    time.sleep(5)
+                    self.logger.warning(f"AMI 事件監聽登入失敗，{backoff:.0f}s 後重試")
+                    time.sleep(backoff)
+                    backoff = min(backoff_max, backoff * 2)
                     continue
+
+                # 成功連線：重置 backoff
+                backoff = 5.0
 
                 # 訂閱通話相關事件
                 ev_sock.send(b"Action: Events\r\nEventMask: call\r\n\r\n")
@@ -294,10 +302,12 @@ class SIPClient:
             except Exception as e:
                 self.logger.debug(f"AMI 事件監聽重連: {e}")
                 try:
-                    ev_sock.close()
+                    if ev_sock:
+                        ev_sock.close()
                 except Exception:
                     pass
-                time.sleep(5)
+                time.sleep(backoff)
+                backoff = min(backoff_max, backoff * 2)
 
     def _process_ami_event(self, event_str: str):
         """解析並處理單一 AMI 事件"""
