@@ -40,7 +40,7 @@ COMPANY_UPDATE_INTERVAL = 5000  # 5 秒
 CALL_WATCHDOG_INTERVAL = 10_000  # 10 秒
 # 網頁開門請求輪詢間隔（ms）
 DOOR_REQUEST_POLL_INTERVAL = 500
-VOICE_CALL_QUEUE_FRESH_S = 15           # 只處理 N 秒內的新請求（語音門禁）
+VOICE_CALL_QUEUE_FRESH_S = 90           # 只處理 N 秒內的新請求（語音門禁，需大於 VOICE_CALL_MIN_INTERVAL_S）
 VOICE_CALL_QUEUE_COOLDOWN_S = 10.0      # 通話結束後冷卻（防止結束即回撥）
 VOICE_CALL_MIN_INTERVAL_S = 60.0        # 上次撥號開始後至少間隔 N 秒才能再撥（防假陽性斷線後快速重撥）
 VOICE_CALL_QUEUE_PROCESSING_TTL_S = 600 # processing TTL（秒）：超時視為卡死可被清理
@@ -411,7 +411,9 @@ class IntercomSystem:
                 self._active_vcq_id = None
                 self._active_vcq_extension = ""
                 self._active_vcq_connected = False
-                self.logger.warning(f"[VoiceGate] 撥號失敗，{name}（分機 {extension}）不在線")
+                # 立即失敗（分機不在線）不鎖定其他分機佇列，重置 MIN_INTERVAL 鎖定
+                self._last_call_start_time = 0.0
+                self.logger.warning(f"[VoiceGate] 撥號失敗，{name}（分機 {extension}）不在線，已解除 MIN_INTERVAL 鎖定")
                 self.call_window.set_status("unavailable")
                 self.root.after(2500, self._show_main)
             # 撥號成功時：不改 status，保持 processing 直到 _on_call_ended 做 finalize
