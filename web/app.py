@@ -1508,7 +1508,7 @@ def register_routes(app):
         """嘗試開啟攝影機，最多等 5 秒（face_manager 釋放後才能開啟）"""
         for _ in range(10):
             try:
-                cap = _cv2.VideoCapture('/dev/video0', _cv2.CAP_V4L2)
+                cap = _cv2.VideoCapture('/dev/video1', _cv2.CAP_V4L2)
                 if cap.isOpened():
                     cap.set(_cv2.CAP_PROP_FRAME_WIDTH, 640)
                     cap.set(_cv2.CAP_PROP_FRAME_HEIGHT, 480)
@@ -1552,7 +1552,7 @@ def register_routes(app):
         """單張快照"""
         from flask import Response
         try:
-            cap = _cv2.VideoCapture('/dev/video0', _cv2.CAP_V4L2)
+            cap = _cv2.VideoCapture('/dev/video1', _cv2.CAP_V4L2)
             if not cap.isOpened():
                 return jsonify({'error': 'camera unavailable'}), 503
             ret, frame = cap.read()
